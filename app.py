@@ -171,7 +171,7 @@ def require_admin(request: Request):
     return None
 
 
-# ── Цены Steam/Skinport (общие для всех) ────────────────────────────────────
+# ── Цены (loot.farm — публичный API без авторизации) ────────────────────────
 class RateLimited(Exception):
     pass
 
@@ -181,36 +181,42 @@ async def ensure_prices(c: httpx.AsyncClient):
     with prices_lock:
         if prices and time.time() - prices_at < 3600:
             return
-    # Используем requests-стиль через отдельный клиент без авто-декодирования
-    async with httpx.AsyncClient(timeout=60) as sc:
+    import json as _j, gzip as _gz
+
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as sc:
         r = await sc.get(
-            "https://api.skinport.com/v1/items",
-            params={"app_id": 730, "currency": "USD"},
-            headers={"Accept-Encoding": "identity", "Accept": "application/json"},
+            "https://loot.farm/fullprice.json",
+            headers={"Accept-Encoding": "identity", "User-Agent": "Mozilla/5.0"},
         )
-    r.raise_for_status()
+
+    if r.status_code != 200:
+        raise RuntimeError(f"loot.farm вернул {r.status_code}")
+
     raw = r.content
-    # на всякий случай распакуем если всё же пришло сжатое
     if raw[:2] == b'\x1f\x8b':
-        import gzip as _gz; raw = _gz.decompress(raw)
-    elif raw[:1] in (b'\x8b', b'\x9c', b'\xa0'):
-        try:
-            import brotli as _br; raw = _br.decompress(raw)
-        except Exception:
-            pass
-    import json as _j
+        raw = _gz.decompress(raw)
+
     data = _j.loads(raw)
     if not isinstance(data, list):
-        raise RuntimeError(f"Skinport {r.status_code}: {str(data)[:120]}")
+        raise RuntimeError(f"loot.farm: неожиданный формат ответа")
+
+    new_prices: dict[str, float] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        price_cents = item.get("price")  # цена в центах USD
+        if name and price_cents and price_cents > 0:
+            new_prices[name] = round(price_cents / 100 * MULT, 2)
+
+    if len(new_prices) < 1000:
+        raise RuntimeError(f"loot.farm: слишком мало предметов ({len(new_prices)})")
+
     with prices_lock:
         prices.clear()
-        for i in data:
-            if isinstance(i, dict):
-                p = i.get("min_price") or i.get("suggested_price")
-                if p:
-                    prices[i["market_hash_name"]] = p * MULT
+        prices.update(new_prices)
         prices_at = time.time()
-    print(f"цены обновлены: {len(prices)} предметов", flush=True)
+    print(f"цены обновлены (loot.farm): {len(prices)} предметов", flush=True)
 
 
 async def inventory_usd(c: httpx.AsyncClient, steam_id: str) -> float | None:
