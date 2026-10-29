@@ -21,6 +21,18 @@ if sys.stdout is None or sys.stderr is None:
     sys.stdout = sys.stderr = open("panel.log", "a", encoding="utf-8", buffering=1)
 
 CFG_PATH = os.path.join(BASE, "config.json")
+# Если config.json нет — создаём из шаблона
+if not os.path.exists(CFG_PATH):
+    example = os.path.join(BASE, "config.example.json")
+    if os.path.exists(example):
+        shutil.copy(example, CFG_PATH)
+    else:
+        with open(CFG_PATH, "w", encoding="utf-8") as _f:
+            json.dump({"faceit_key": "", "faceit_nick": "", "min_usd": 300,
+                       "price_mult": 0.75, "poll_seconds": 120, "steam_delay": 1,
+                       "batch_size": 100, "batch_pause": 15,
+                       "host": "0.0.0.0", "port": 8000, "panel_password": ""}, _f, indent=2)
+    print(f"Создан config.json из шаблона — зайди в настройки панели", flush=True)
 CFG = json.load(open(CFG_PATH, encoding="utf-8"))
 cfg_lock = threading.Lock()
 MULT    = float(CFG.get("price_mult", 0.75))

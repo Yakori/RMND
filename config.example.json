@@ -1,0 +1,13 @@
+{
+  "faceit_key": "",
+  "faceit_nick": "",
+  "min_usd": 300,
+  "price_mult": 0.75,
+  "poll_seconds": 120,
+  "steam_delay": 1,
+  "batch_size": 100,
+  "batch_pause": 15,
+  "host": "0.0.0.0",
+  "port": 8000,
+  "panel_password": ""
+}
