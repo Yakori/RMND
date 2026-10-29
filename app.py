@@ -183,15 +183,10 @@ async def ensure_prices(c: httpx.AsyncClient):
             return
     r = await c.get("https://api.skinport.com/v1/items",
                     params={"app_id": 730, "currency": "USD"},
-                    headers={"Accept-Encoding": "gzip, deflate"})
+                    headers={"Accept-Encoding": "identity"})
     r.raise_for_status()
-    # httpx может не декомпрессировать автоматически — делаем вручную
-    content = r.content
-    if content[:2] == b'\x1f\x8b':  # gzip magic bytes
-        import gzip as _gzip
-        content = _gzip.decompress(content)
     import json as _json
-    data = _json.loads(content.decode("utf-8"))
+    data = _json.loads(r.content.decode("utf-8"))
     if not isinstance(data, list):
         raise RuntimeError(f"Skinport {r.status_code}: {str(data)[:120]}")
     with prices_lock:
