@@ -187,7 +187,7 @@ async def ensure_prices(_c: httpx.AsyncClient):
 
     def _fetch() -> bytes:
         req = _ur.Request(
-            "https://loot.farm/fullprice.json",
+            "https://market.csgo.com/api/v2/prices/USD.json",
             headers={"User-Agent": "Mozilla/5.0", "Accept-Encoding": "identity"},
         )
         with _ur.urlopen(req, timeout=60) as resp:
@@ -199,26 +199,27 @@ async def ensure_prices(_c: httpx.AsyncClient):
         raw = _gz.decompress(raw)
 
     data = _j.loads(raw.decode("utf-8"))
-    if not isinstance(data, list):
-        raise RuntimeError(f"loot.farm: неожиданный формат ответа")
+    if not isinstance(data, dict) or not data.get("success"):
+        raise RuntimeError(f"market.csgo.com: неожиданный ответ: {str(data)[:120]}")
 
+    items = data.get("items", [])
     new_prices: dict[str, float] = {}
-    for item in data:
+    for item in items:
         if not isinstance(item, dict):
             continue
-        name = item.get("name")
-        price_cents = item.get("price")  # цена в центах USD
-        if name and price_cents and price_cents > 0:
-            new_prices[name] = round(price_cents / 100 * MULT, 2)
+        name = item.get("market_hash_name")
+        price = item.get("price")
+        if name and price:
+            new_prices[name] = round(float(price) * MULT, 2)
 
     if len(new_prices) < 1000:
-        raise RuntimeError(f"loot.farm: слишком мало предметов ({len(new_prices)})")
+        raise RuntimeError(f"market.csgo.com: слишком мало предметов ({len(new_prices)})")
 
     with prices_lock:
         prices.clear()
         prices.update(new_prices)
         prices_at = time.time()
-    print(f"цены обновлены (loot.farm): {len(prices)} предметов", flush=True)
+    print(f"цены обновлены (market.csgo.com): {len(prices)} предметов", flush=True)
 
 
 async def inventory_usd(c: httpx.AsyncClient, steam_id: str) -> float | None:
