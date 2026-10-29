@@ -176,27 +176,29 @@ class RateLimited(Exception):
     pass
 
 
-async def ensure_prices(c: httpx.AsyncClient):
+async def ensure_prices(_c: httpx.AsyncClient):
     global prices_at
     with prices_lock:
         if prices and time.time() - prices_at < 3600:
             return
-    import json as _j, gzip as _gz
 
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as sc:
-        r = await sc.get(
+    # Используем urllib напрямую — без авто-сжатия httpx
+    import json as _j, gzip as _gz, urllib.request as _ur
+
+    def _fetch() -> bytes:
+        req = _ur.Request(
             "https://loot.farm/fullprice.json",
-            headers={"Accept-Encoding": "identity", "User-Agent": "Mozilla/5.0"},
+            headers={"User-Agent": "Mozilla/5.0", "Accept-Encoding": "identity"},
         )
+        with _ur.urlopen(req, timeout=60) as resp:
+            return resp.read()
 
-    if r.status_code != 200:
-        raise RuntimeError(f"loot.farm вернул {r.status_code}")
+    raw = await asyncio.get_event_loop().run_in_executor(None, _fetch)
 
-    raw = r.content
     if raw[:2] == b'\x1f\x8b':
         raw = _gz.decompress(raw)
 
-    data = _j.loads(raw)
+    data = _j.loads(raw.decode("utf-8"))
     if not isinstance(data, list):
         raise RuntimeError(f"loot.farm: неожиданный формат ответа")
 
