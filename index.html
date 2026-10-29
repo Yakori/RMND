@@ -1,0 +1,306 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FACEIT панель</title>
+<style>
+:root{--bg:#0a0c0f;--p1:#11141a;--p2:#171b22;--line:#232a33;--fg:#eaeef2;--mut:#8994a1;--blue:#8ea7c0;--blue2:#5f7a96;
+--red:#ef6b72;--grn:#4cc58b;--gry:#4b5563;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(900px 500px at 85% -10%,#1b2430 0,transparent 60%),var(--bg);color:var(--fg);
+font:15px/1.4 "Segoe UI Variable","Segoe UI",system-ui,sans-serif;min-height:100vh}
+.app{display:grid;grid-template-columns:220px 1fr;gap:18px;max-width:1240px;margin:0 auto;padding:18px;min-height:100vh}
+aside{background:var(--p1);border:1px solid var(--line);border-radius:20px;padding:20px 14px;display:flex;flex-direction:column;gap:6px;position:sticky;top:18px;height:calc(100vh - 36px)}
+.logo{display:flex;align-items:center;gap:10px;padding:0 8px 18px;font:600 19px/1 Bahnschrift,"Segoe UI",sans-serif}
+.logo i{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--blue),var(--blue2));display:grid;place-items:center;color:#0a0c0f;font-style:normal;font-weight:700}
+.nav{display:flex;justify-content:space-between;align-items:center;border:0;background:none;color:var(--mut);padding:11px 12px;border-radius:12px;font:inherit;cursor:pointer;text-align:left;width:100%}
+.nav:hover{background:var(--p2);color:var(--fg)}
+.nav.on{background:linear-gradient(135deg,#232c38,#1a212a);color:var(--fg);box-shadow:inset 0 0 0 1px #2c3744}
+.nav b{font-weight:600;font-size:13px;background:var(--p2);border-radius:8px;padding:2px 8px;color:var(--fg)}
+.nav-sep{height:1px;background:var(--line);margin:6px 0}
+.bot{margin-top:auto;padding:12px;border-radius:14px;background:var(--p2);border:1px solid var(--line);font-size:13px;color:var(--mut)}
+.bot b{display:block;color:var(--fg);font-weight:600;margin-top:2px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--grn);margin-right:6px;box-shadow:0 0 8px var(--grn)}
+.bot.err .dot{background:var(--red);box-shadow:0 0 8px var(--red)}
+.main{min-width:0;display:flex;flex-direction:column;gap:16px}
+h1{font:600 28px/1 Bahnschrift,"Segoe UI",sans-serif;margin:6px 0 0}
+.sub{color:var(--mut);font-size:14px;margin-top:6px}
+.cards{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:14px}
+.card{background:var(--p1);border:1px solid var(--line);border-radius:20px;padding:18px}
+.card small{color:var(--mut);font-size:13px}
+.card .v{font:600 30px/1.1 Bahnschrift,"Segoe UI",sans-serif;margin-top:10px}
+.hero{background:radial-gradient(260px 160px at 90% 0,#7f9bb855,transparent 70%),linear-gradient(135deg,#2b3644,#151a21 70%);border-color:#2f3a48}
+.hero .v{font-size:40px}
+.panel{background:var(--p1);border:1px solid var(--line);border-radius:20px;padding:6px 18px}
+.row{display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:14px;margin:4px 0;background:var(--p2)}
+.row:last-child{margin-bottom:0}
+.av{width:40px;height:40px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:700;color:#0a0c0f;background:linear-gradient(135deg,var(--blue),var(--blue2))}
+.av.admin-av{background:linear-gradient(135deg,#e0a060,#b06820)}
+.who{flex:1;min-width:0}
+.nick{display:block;font-weight:600;font-size:16px;color:var(--t,var(--fg));text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nick:hover{text-decoration:underline}
+.st{font-size:13px;color:var(--mut);margin-top:2px}
+.st:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--c,var(--gry));margin-right:6px}
+.usd{font:600 22px/1 Bahnschrift,"Segoe UI",sans-serif;min-width:80px;text-align:right}
+.act{display:flex;gap:6px}
+button,.btn{border:1px solid var(--line);background:var(--p2);color:var(--fg);border-radius:12px;padding:8px 14px;font:inherit;font-size:14px;cursor:pointer;text-decoration:none;white-space:nowrap}
+button:hover,.btn:hover{border-color:var(--blue2)}
+button:focus-visible,.btn:focus-visible,.nav:focus-visible,.nick:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.go{background:linear-gradient(135deg,var(--blue),var(--blue2));border-color:transparent;color:#0a0c0f;font-weight:600}
+.del{color:var(--red);padding:8px 11px;border-color:transparent;background:transparent}
+.del:hover{background:#2a1515;border-color:var(--red)}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.04em}
+.badge-admin{background:#2a1f0e;color:#e0a060;border:1px solid #3d2c10}
+.badge-worker{background:#0e1a2a;color:#5f7a96;border:1px solid #1a2e42}
+.empty{color:var(--mut);padding:36px 0;text-align:center}
+.log{font-size:13px;color:var(--mut);white-space:pre-wrap;line-height:1.7;max-height:220px;overflow:auto;padding:14px 0}
+.ttl{font-weight:600;padding:14px 0 6px;font-size:15px}
+.form{display:flex;flex-direction:column;gap:16px;padding:18px 0}
+label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--mut)}
+input,select{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--p2);color:var(--fg);font:inherit}
+.ok{color:var(--grn);font-size:13px;min-height:1.2em}
+.ferr{color:var(--red);font-size:13px;min-height:1.2em}
+/* admin таблица */
+.utable{width:100%;border-collapse:collapse;font-size:14px}
+.utable th{text-align:left;color:var(--mut);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:10px 12px;border-bottom:1px solid var(--line)}
+.utable td{padding:12px;border-bottom:1px solid var(--line)}
+.utable tr:last-child td{border:0}
+.utable tr:hover td{background:#13171e}
+.state-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px}
+.sd-ok{background:var(--grn)}
+.sd-err{background:var(--red)}
+.sd-idle{background:var(--mut)}
+@media(max-width:900px){.app{grid-template-columns:1fr}aside{position:static;height:auto;flex-direction:row;flex-wrap:wrap}.logo{width:100%;padding-bottom:6px}.bot{display:none}.cards{grid-template-columns:1fr 1fr}.hero{grid-column:1/-1}}
+@media(max-width:560px){.row{flex-wrap:wrap}.usd{order:2}.act{order:3;width:100%}}
+</style></head><body><div class="app">
+<aside>
+  <div class="logo"><i>F</i>Faceit панель</div>
+  <div id="nav"></div>
+  <div class="bot" id="bot">
+    <span><span class="dot"></span>Бот</span>
+    <b id="bs">…</b>
+    <div id="user-info" style="margin-top:8px;font-size:13px;color:var(--mut)"></div>
+    <a href="/logout" style="display:block;margin-top:10px;text-align:center" class="btn">Выйти</a>
+  </div>
+</aside>
+<div class="main">
+
+  <!-- Игроки -->
+  <div id="players-view">
+    <div><h1>Игроки с инвентарём</h1><div class="sub">Отмечай заявки: серый, красный (ждём), зелёный (принял)</div></div>
+    <div class="cards" id="cards"></div>
+    <div class="panel" style="margin-top:16px" id="list"></div>
+    <div class="panel" style="margin-top:16px;margin-bottom:16px">
+      <div class="ttl">Журнал бота</div>
+      <div class="log" id="ev"></div>
+    </div>
+  </div>
+
+  <!-- Настройки -->
+  <div id="settings-view" hidden>
+    <div><h1>Настройки</h1><div class="sub">Привязаны к твоему аккаунту — другие пользователи используют свои</div></div>
+    <div class="panel"><form class="form" onsubmit="saveCfg(event)">
+      <label>Минимальная цена инвентаря, $<input id="min_usd" type="number" min="0" step="1" required></label>
+      <label>FACEIT API ключ<input id="faceit_key" type="text" autocomplete="off" spellcheck="false" required></label>
+      <label>FACEIT ник<input id="faceit_nick" type="text" autocomplete="off" required></label>
+      <div><button class="go" type="submit">Сохранить</button></div>
+      <div class="ok" id="sok"></div>
+      <div class="ferr" id="serr"></div>
+    </form></div>
+  </div>
+
+  <!-- Аккаунты (только admin) -->
+  <div id="admin-view" hidden>
+    <div><h1>Аккаунты</h1><div class="sub">Управление пользователями и лог входов</div></div>
+
+    <div class="panel" style="padding:16px 18px">
+      <div class="ttl" style="padding-top:4px">Пользователи</div>
+      <table class="utable" id="utbl">
+        <thead><tr>
+          <th>Логин</th><th>Роль</th><th>FACEIT ник</th><th>Статус бота</th>
+          <th>Последний вход</th><th>Регистрация</th><th></th>
+        </tr></thead>
+        <tbody id="utbody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel" style="margin-top:16px;margin-bottom:16px;padding:16px 18px">
+      <div class="ttl" style="padding-top:4px">Лог входов <span style="font-weight:400;color:var(--mut);font-size:13px">(последние 100)</span></div>
+      <div class="log" id="login-log" style="max-height:300px"></div>
+    </div>
+  </div>
+
+</div></div>
+<script>
+const C={new:'var(--gry)',sent:'var(--red)',accepted:'var(--grn)'};
+const T={new:'var(--fg)',sent:'var(--red)',accepted:'var(--grn)'};
+const L={new:'Заявку не отправлял',sent:'Заявка отправлена, ждём',accepted:'В друзьях'};
+const N={new:['sent','Отправил'],sent:['accepted','Принял'],accepted:['new','Сбросить']};
+const FILTERS=[['all','Все игроки'],['new','Новые'],['sent','Ждут'],['accepted','Приняли']];
+
+let data=[], f='all', page='players', myRole='worker', myName='';
+const e=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cnt=k=>k=='all'?data.length:data.filter(p=>p.status==k).length;
+const fmtDate=ts=>ts?new Date(ts*1000).toLocaleString('ru',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+
+function go(p){
+  page=p;
+  document.getElementById('players-view').hidden = p!=='players';
+  document.getElementById('settings-view').hidden = p!=='settings';
+  document.getElementById('admin-view').hidden   = p!=='admin';
+  if(p==='settings') loadCfg();
+  if(p==='admin')    loadAdmin();
+  if(p==='players')  drawPlayers();
+  drawNav();
+}
+
+function drawNav(){
+  const isAdmin = myRole==='admin';
+  let html = FILTERS.map(([k,n])=>
+    `<button class="nav ${page==='players'&&k==f?'on':''}" onclick="f='${k}';go('players')">${n}<b>${cnt(k)}</b></button>`
+  ).join('');
+  html += `<div class="nav-sep"></div>`;
+  html += `<button class="nav ${page==='settings'?'on':''}" onclick="go('settings')">Настройки</button>`;
+  if(isAdmin)
+    html += `<button class="nav ${page==='admin'?'on':''}" onclick="go('admin')">👑 Аккаунты</button>`;
+  document.getElementById('nav').innerHTML = html;
+}
+
+function drawPlayers(){
+  if(page!=='players') return;
+  const sum=data.reduce((a,p)=>a+p.usd,0);
+  document.getElementById('cards').innerHTML=
+    `<div class="card hero"><small>Общая сумма инвентарей</small><div class="v">$${sum.toLocaleString('ru')}</div></div>`+
+    `<div class="card"><small>Новые</small><div class="v">${cnt('new')}</div></div>`+
+    `<div class="card"><small>Ждут ответа</small><div class="v" style="color:var(--red)">${cnt('sent')}</div></div>`+
+    `<div class="card"><small>Приняли</small><div class="v" style="color:var(--grn)">${cnt('accepted')}</div></div>`;
+  const ps=data.filter(p=>f=='all'||p.status==f), el=document.getElementById('list');
+  if(!ps.length){
+    el.innerHTML='<div class="empty">'+(data.length?'В этом разделе пусто.':'Пока никого. Сыграй матч, список обновится сам.')+'</div>';
+    return;
+  }
+  el.innerHTML=ps.map(p=>`
+    <div class="row" style="--c:${C[p.status]};--t:${T[p.status]}">
+      <div class="av">${e((p.nick[0]||'?').toUpperCase())}</div>
+      <div class="who">
+        <a class="nick" target="_blank" rel="noopener" href="https://www.faceit.com/en/players/${encodeURIComponent(p.nick)}">${e(p.nick)}</a>
+        <div class="st">${L[p.status]}</div>
+      </div>
+      <div class="usd">$${p.usd}</div>
+      <div class="act">
+        <a class="btn" target="_blank" rel="noopener" href="https://steamcommunity.com/profiles/${e(p.steam)}/inventory">Инвентарь</a>
+        <button class="${p.status=='accepted'?'':'go'}" onclick="setSt('${e(p.nick)}','${N[p.status][0]}')">${N[p.status][1]}</button>
+        <button class="del" title="Удалить" onclick="delPlayer('${e(p.nick)}')">DEL</button>
+      </div>
+    </div>`).join('');
+}
+
+async function loadPlayers(){
+  data=await(await fetch('/api/players')).json();
+  drawPlayers();
+  drawNav();
+}
+
+async function setSt(n,s){
+  await fetch('/api/players/'+encodeURIComponent(n),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s})});
+  loadPlayers();
+}
+async function delPlayer(n){
+  await fetch('/api/players/'+encodeURIComponent(n),{method:'DELETE'});
+  loadPlayers();
+}
+
+async function loadCfg(){
+  const s=await(await fetch('/api/settings')).json();
+  document.getElementById('min_usd').value=s.min_usd;
+  document.getElementById('faceit_key').value=s.faceit_key;
+  document.getElementById('faceit_nick').value=s.faceit_nick;
+  document.getElementById('sok').textContent='';
+  document.getElementById('serr').textContent='';
+}
+async function saveCfg(ev){
+  ev.preventDefault();
+  document.getElementById('sok').textContent='';
+  document.getElementById('serr').textContent='';
+  const body={min_usd:Number(document.getElementById('min_usd').value),
+               faceit_key:document.getElementById('faceit_key').value,
+               faceit_nick:document.getElementById('faceit_nick').value};
+  const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const s=await r.json();
+  if(!r.ok){document.getElementById('serr').textContent=s.error||'Не сохранилось';return}
+  document.getElementById('min_usd').value=s.min_usd;
+  document.getElementById('faceit_key').value=s.faceit_key;
+  document.getElementById('faceit_nick').value=s.faceit_nick;
+  document.getElementById('sok').textContent='Сохранено';
+}
+
+// ── Admin ──────────────────────────────────────────────────────────────────
+async function loadAdmin(){
+  loadUsers();
+  loadLoginLog();
+}
+
+async function loadUsers(){
+  const users=await(await fetch('/api/admin/users')).json();
+  document.getElementById('utbody').innerHTML=users.map(u=>{
+    const stateDot = u.state==='ошибка'?'sd-err': u.state==='жду новых матчей'?'sd-ok':'sd-idle';
+    return `<tr>
+      <td><b>${e(u.username)}</b></td>
+      <td><span class="badge badge-${u.role}">${u.role==='admin'?'👑 admin':'worker'}</span></td>
+      <td style="color:var(--mut)">${e(u.faceit_nick)||'—'}</td>
+      <td><span class="state-dot ${stateDot}"></span>${e(u.state)}</td>
+      <td style="color:var(--mut)">${fmtDate(u.last_login)}</td>
+      <td style="color:var(--mut)">${fmtDate(u.created_at)}</td>
+      <td>
+        <select onchange="setRole(${u.id},this.value)" style="width:auto;padding:4px 8px;font-size:13px">
+          <option value="worker" ${u.role==='worker'?'selected':''}>worker</option>
+          <option value="admin"  ${u.role==='admin' ?'selected':''}>admin</option>
+        </select>
+        <button class="del" onclick="delUser(${u.id},'${e(u.username)}')" style="margin-left:4px">DEL</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function setRole(uid, role){
+  await fetch('/api/admin/users/'+uid+'/role',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role})});
+  loadUsers();
+}
+
+async function delUser(uid, name){
+  if(!confirm('Удалить пользователя '+name+'?')) return;
+  const r=await fetch('/api/admin/users/'+uid,{method:'DELETE'});
+  const s=await r.json();
+  if(!r.ok){alert(s.error||'Ошибка');return}
+  loadUsers();
+}
+
+async function loadLoginLog(){
+  const logs=await(await fetch('/api/admin/login_log')).json();
+  document.getElementById('login-log').textContent=logs.map(l=>
+    `${fmtDate(l.at)}  ${l.ok?'✅':'❌'}  ${l.username}  (${l.ip})`
+  ).join('\n')||'Логов нет';
+}
+
+// ── Статус бота ────────────────────────────────────────────────────────────
+async function stat(){
+  const b=document.getElementById('bot');
+  try{
+    const s=await(await fetch('/api/status')).json();
+    b.classList.toggle('err',s.state==='ошибка');
+    document.getElementById('bs').textContent=s.state;
+    document.getElementById('ev').textContent=s.events.join('\n')||'Событий пока нет';
+    // имя и роль
+    if(s.username!==myName || s.role!==myRole){
+      myName=s.username; myRole=s.role;
+      const ui=document.getElementById('user-info');
+      const badge=myRole==='admin'?'<span class="badge badge-admin">👑 admin</span>':'<span class="badge badge-worker">worker</span>';
+      ui.innerHTML=`<span style="color:var(--fg);font-weight:600">${e(myName)}</span> ${badge}`;
+      drawNav();
+    }
+  }catch(x){b.classList.add('err');document.getElementById('bs').textContent='не отвечает'}
+}
+
+loadPlayers();
+stat();
+setInterval(loadPlayers,30000);
+setInterval(stat,4000);
+</script></body></html>
