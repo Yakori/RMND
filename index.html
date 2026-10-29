@@ -101,6 +101,13 @@ input,select{width:100%;padding:12px 14px;border-radius:12px;border:1px solid va
       <label>Минимальная цена инвентаря, $<input id="min_usd" type="number" min="0" step="1" required></label>
       <label>FACEIT API ключ<input id="faceit_key" type="text" autocomplete="off" spellcheck="false" required></label>
       <label>FACEIT ник<input id="faceit_nick" type="text" autocomplete="off" required></label>
+      <label style="margin-top:8px">
+        FACEIT Bearer токен
+        <span style="color:var(--mut);font-size:12px;margin-top:2px">
+          Нужен для авто-отправки инвайтов в друзья. Получить: открой faceit.com → F12 → Network → любой XHR запрос → заголовок <b>Authorization: Bearer ...</b>
+        </span>
+        <input id="faceit_bearer" type="password" autocomplete="off" spellcheck="false" placeholder="eyJhbGci...">
+      </label>
       <div><button class="go" type="submit">Сохранить</button></div>
       <div class="ok" id="sok"></div>
       <div class="ferr" id="serr"></div>
@@ -213,6 +220,7 @@ async function loadCfg(){
   document.getElementById('min_usd').value=s.min_usd;
   document.getElementById('faceit_key').value=s.faceit_key;
   document.getElementById('faceit_nick').value=s.faceit_nick;
+  document.getElementById('faceit_bearer').value=s.faceit_bearer||'';
   document.getElementById('sok').textContent='';
   document.getElementById('serr').textContent='';
 }
@@ -220,15 +228,19 @@ async function saveCfg(ev){
   ev.preventDefault();
   document.getElementById('sok').textContent='';
   document.getElementById('serr').textContent='';
-  const body={min_usd:Number(document.getElementById('min_usd').value),
-               faceit_key:document.getElementById('faceit_key').value,
-               faceit_nick:document.getElementById('faceit_nick').value};
+  const body={
+    min_usd:Number(document.getElementById('min_usd').value),
+    faceit_key:document.getElementById('faceit_key').value,
+    faceit_nick:document.getElementById('faceit_nick').value,
+    faceit_bearer:document.getElementById('faceit_bearer').value,
+  };
   const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const s=await r.json();
   if(!r.ok){document.getElementById('serr').textContent=s.error||'Не сохранилось';return}
   document.getElementById('min_usd').value=s.min_usd;
   document.getElementById('faceit_key').value=s.faceit_key;
   document.getElementById('faceit_nick').value=s.faceit_nick;
+  document.getElementById('faceit_bearer').value=s.faceit_bearer||'';
   document.getElementById('sok').textContent='Сохранено';
 }
 
