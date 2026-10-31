@@ -352,7 +352,7 @@ async def faceit_send_friend(api_key: str, bearer: str, my_faceit_id: str, targe
 
         r2 = await c.post(
             f"{FACEIT_API2}/friend-requests/v1/users/{my_faceit_id}/requests",
-            json={"targetUserId": target_id},
+            json={"users": [target_id], "conversionPoint": "Profile"},
             headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
         )
         if r2.status_code in (200, 201, 204):

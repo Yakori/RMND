@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FACEIT Panel Token",
-  "version": "1.3",
+  "version": "1.4",
   "description": "Отправляет заявку в друзья с профиля FACEIT",
   "permissions": [
     "storage",
