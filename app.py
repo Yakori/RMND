@@ -37,7 +37,7 @@ CFG = json.load(open(CFG_PATH, encoding="utf-8"))
 cfg_lock = threading.Lock()
 MULT    = float(CFG.get("price_mult", 0.75))
 POLL    = int(CFG.get("poll_seconds", 120))
-STEAM_DELAY = float(CFG.get("steam_delay", 1))
+STEAM_DELAY = float(CFG.get("steam_delay", 5))
 BATCH   = int(CFG.get("batch_size", 100))
 BATCH_PAUSE = float(CFG.get("batch_pause", 15))
 HOST    = os.environ.get("HOST", CFG.get("host", "0.0.0.0"))
@@ -391,6 +391,13 @@ async def poll_user(uid: int):
                         (uid, m["match_id"])).fetchone()]
                 log_bot(uid, f"матчей: {len(items)}, новых: {len(new)}")
 
+                # Если новых матчей нет — пропускаем проверку инвентарей
+                if not new:
+                    with bots_lock:
+                        bots[uid]["state"] = "жду новых матчей"
+                    await asyncio.sleep(POLL)
+                    continue
+
                 for m in new:
                     mid = m["match_id"]
                     r2 = await fc.get(f"{API}/matches/{mid}")
@@ -412,13 +419,16 @@ async def poll_user(uid: int):
                             with bots_lock:
                                 bots[uid]["state"] = f"проверяю {pnick}"
                             usd = "retry"
-                            for _ in range(3):
+                            for attempt in range(3):
                                 try:
                                     usd = await inventory_usd(c, sid)
                                     break
                                 except RateLimited:
-                                    log_bot(uid, "Steam просит подождать, жду 60 сек")
-                                    await asyncio.sleep(60)
+                                    wait = 300 + attempt * 60
+                                    log_bot(uid, f"Steam rate limit, жду {wait} сек")
+                                    with bots_lock:
+                                        bots[uid]["state"] = f"Steam rate limit, жду {wait}с"
+                                    await asyncio.sleep(wait)
                             if usd == "retry":
                                 continue
                             checked[pnick] = time.time()
