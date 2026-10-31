@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>FACEIT Panel Token</title>
+<style>
+  :root { color-scheme: dark }
+  * { box-sizing: border-box; margin: 0; padding: 0 }
+  body {
+    width: 320px;
+    background: #0a0c0f;
+    color: #eaeef2;
+    font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+    padding: 16px;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .logo i {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #8ea7c0, #5f7a96);
+    display: grid; place-items: center;
+    color: #0a0c0f; font-style: normal; font-weight: 700;
+  }
+  .logo span { font-weight: 600; font-size: 15px }
+
+  .status-box {
+    background: #11141a;
+    border: 1px solid #232a33;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+  .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none }
+  .dot-ok  { background: #4cc58b; box-shadow: 0 0 6px #4cc58b }
+  .dot-no  { background: #8994a1 }
+  .dot-err { background: #ef6b72; box-shadow: 0 0 6px #ef6b72 }
+  .token-age { color: #8994a1; font-size: 12px }
+
+  .url-section { margin-bottom: 10px }
+  label { display: block; font-size: 12px; color: #8994a1; margin-bottom: 4px }
+  input {
+    width: 100%; padding: 8px 10px;
+    border-radius: 8px; border: 1px solid #232a33;
+    background: #171b22; color: #eaeef2; font: inherit;
+    outline: none;
+  }
+  input:focus { border-color: #5f7a96 }
+
+  .btn {
+    display: block; width: 100%; padding: 10px;
+    border: 0; border-radius: 10px;
+    font: 600 14px/1 inherit; cursor: pointer;
+    background: linear-gradient(135deg, #8ea7c0, #5f7a96);
+    color: #0a0c0f; margin-bottom: 8px;
+    transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85 }
+  .btn:disabled { opacity: .4; cursor: not-allowed }
+  .btn-sec {
+    background: #171b22;
+    border: 1px solid #232a33;
+    color: #eaeef2;
+  }
+
+  .msg { font-size: 12px; min-height: 1.2em; margin-top: 6px; text-align: center }
+  .msg-ok  { color: #4cc58b }
+  .msg-err { color: #ef6b72 }
+
+  .hint {
+    font-size: 11px; color: #8994a1;
+    margin-top: 10px; line-height: 1.5;
+    border-top: 1px solid #232a33;
+    padding-top: 10px;
+  }
+</style>
+</head>
+<body>
+<div class="logo"><i>F</i><span>FACEIT Panel Token</span></div>
+
+<div class="status-box">
+  <div class="status-row">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">Проверяю...</span>
+  </div>
+  <div class="token-age" id="token-age"></div>
+</div>
+
+<div class="url-section">
+  <label>Адрес панели</label>
+  <input type="text" id="panel-url" placeholder="http://26.x.x.x:8000">
+</div>
+
+<button class="btn" id="btn-send">Отправить токен в панель</button>
+<button class="btn btn-sec" id="btn-open-faceit">Открыть faceit.com (обновить токен)</button>
+
+<div class="msg" id="msg"></div>
+
+<div class="hint">
+  Расширение автоматически перехватывает токен когда ты открываешь faceit.com.
+  Если токен не найден — нажми кнопку выше чтобы открыть FACEIT.
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

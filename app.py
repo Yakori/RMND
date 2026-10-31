@@ -393,6 +393,8 @@ async def poll_user(uid: int):
 
                 # Если новых матчей нет — пропускаем проверку инвентарей
                 if not new:
+                    with db_lock:
+                        bots[uid]["state"] = "жду новых матчей" if False else None
                     with bots_lock:
                         bots[uid]["state"] = "жду новых матчей"
                     await asyncio.sleep(POLL)
@@ -772,7 +774,27 @@ def api_save_settings(b: SettingsIn, request: Request):
     return {"ok": True, "faceit_key": key, "faceit_nick": nick, "min_usd": usd, "faceit_bearer": bearer}
 
 
-# ── API: admin — список пользователей ─────────────────────────────────────────
+# ── API: обновление bearer токена через расширение ───────────────────────────
+class TokenIn(BaseModel):
+    token: str
+
+
+@app.post("/api/token")
+async def api_set_token(b: TokenIn, request: Request):
+    u = get_user(request)
+    token = b.token.strip()
+    if not token:
+        return JSONResponse({"error": "токен пустой"}, status_code=400)
+    # Получаем faceit_id по токену
+    my_fid = ""
+    if u["faceit_nick"]:
+        my_fid = await get_my_faceit_id(token, u["faceit_nick"])
+    with db_lock:
+        db.execute("UPDATE users SET faceit_bearer=?, faceit_id=? WHERE id=?",
+                   (token, my_fid, u["id"]))
+        db.commit()
+    log_bot(u["id"], f"bearer токен обновлён через расширение")
+    return {"ok": True, "faceit_id": my_fid}
 @app.get("/api/admin/users")
 def api_admin_users(request: Request):
     if not require_admin(request):
