@@ -8,6 +8,5 @@
   "batch_size": 100,
   "batch_pause": 15,
   "host": "0.0.0.0",
-  "port": 8000,
-  "panel_password": ""
+  "port": 8000
 }

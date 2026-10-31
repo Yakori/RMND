@@ -87,6 +87,7 @@ input,select{width:100%;padding:12px 14px;border-radius:12px;border:1px solid va
   <div id="players-view">
     <div><h1>Игроки с инвентарём</h1><div class="sub">Отмечай заявки: серый, красный (ждём), зелёный (принял)</div></div>
     <div class="cards" id="cards"></div>
+    <div id="actmsg" class="ok" style="min-height:1.2em"></div>
     <div class="panel" style="margin-top:16px" id="list"></div>
     <div class="panel" style="margin-top:16px;margin-bottom:16px">
       <div class="ttl">Журнал бота</div>
@@ -173,7 +174,7 @@ function drawNav(){
 
 function drawPlayers(){
   if(page!=='players') return;
-  const sum=data.reduce((a,p)=>a+p.usd,0);
+  const sum=data.reduce((a,p)=>a+(Number(p.usd)||0),0);
   document.getElementById('cards').innerHTML=
     `<div class="card hero"><small>Общая сумма инвентарей</small><div class="v">$${sum.toLocaleString('ru')}</div></div>`+
     `<div class="card"><small>Новые</small><div class="v">${cnt('new')}</div></div>`+
@@ -184,35 +185,64 @@ function drawPlayers(){
     el.innerHTML='<div class="empty">'+(data.length?'В этом разделе пусто.':'Пока никого. Сыграй матч, список обновится сам.')+'</div>';
     return;
   }
-  el.innerHTML=ps.map(p=>`
-    <div class="row" style="--c:${C[p.status]};--t:${T[p.status]}">
+  el.innerHTML=ps.map(p=>{
+    const st=N[p.status]?p.status:'new';
+    const usd=Number(p.usd)||0;
+    return `
+    <div class="row" style="--c:${C[st]};--t:${T[st]}">
       <div class="av">${e((p.nick[0]||'?').toUpperCase())}</div>
       <div class="who">
         <a class="nick" target="_blank" rel="noopener" href="https://www.faceit.com/en/players/${encodeURIComponent(p.nick)}">${e(p.nick)}</a>
-        <div class="st">${L[p.status]}</div>
+        <div class="st">${L[st]}</div>
       </div>
-      <div class="usd">$${p.usd}</div>
+      <div class="usd">$${usd}</div>
       <div class="act">
-        <a class="btn" target="_blank" rel="noopener" href="https://steamcommunity.com/profiles/${e(p.steam)}/inventory">Инвентарь</a>
-        <button class="${p.status=='accepted'?'':'go'}" onclick="setSt('${e(p.nick)}','${N[p.status][0]}')">${N[p.status][1]}</button>
-        <button class="del" title="Удалить" onclick="delPlayer('${e(p.nick)}')">DEL</button>
+        <a class="btn" target="_blank" rel="noopener" href="https://steamcommunity.com/profiles/${encodeURIComponent(p.steam||'')}/inventory">Инвентарь</a>
+        <button type="button" class="${st=='accepted'?'':'go'}" data-act="status" data-nick="${e(p.nick)}" data-next="${N[st][0]}">${N[st][1]}</button>
+        <button type="button" class="del" title="Удалить" data-act="del" data-nick="${e(p.nick)}">DEL</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+function showAct(text, bad){
+  const msg=document.getElementById('actmsg');
+  msg.className=bad?'ferr':'ok';
+  msg.textContent=text||'';
 }
 
 async function loadPlayers(){
-  data=await(await fetch('/api/players')).json();
-  drawPlayers();
-  drawNav();
+  try{
+    const r=await fetch('/api/players');
+    if(!r.ok) return;
+    const rows=await r.json();
+    if(!Array.isArray(rows)) return;
+    data=rows;
+    drawPlayers();
+    drawNav();
+  }catch(err){}
 }
 
 async function setSt(n,s){
-  await fetch('/api/players/'+encodeURIComponent(n),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s})});
-  loadPlayers();
+  showAct('', false);
+  try{
+    const r=await fetch('/api/players/'+encodeURIComponent(n),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s})});
+    const body=await r.json().catch(()=>({}));
+    if(!r.ok){showAct(body.error||'Не сохранилось', true);return}
+    if(body.invite) showAct(body.invite, body.invite!=='заявка отправлена');
+    loadPlayers();
+  }catch(err){showAct('Панель не отвечает', true)}
 }
 async function delPlayer(n){
-  await fetch('/api/players/'+encodeURIComponent(n),{method:'DELETE'});
-  loadPlayers();
+  try{
+    const r=await fetch('/api/players/'+encodeURIComponent(n),{method:'DELETE'});
+    if(!r.ok){
+      const body=await r.json().catch(()=>({}));
+      showAct(body.error||'Не удалилось', true);
+      return;
+    }
+    loadPlayers();
+  }catch(err){showAct('Панель не отвечает', true)}
 }
 
 async function loadCfg(){
@@ -234,8 +264,11 @@ async function saveCfg(ev){
     faceit_nick:document.getElementById('faceit_nick').value,
     faceit_bearer:document.getElementById('faceit_bearer').value,
   };
-  const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const s=await r.json();
+  let r, s;
+  try{
+    r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    s=await r.json();
+  }catch(err){document.getElementById('serr').textContent='Панель не отвечает';return}
   if(!r.ok){document.getElementById('serr').textContent=s.error||'Не сохранилось';return}
   document.getElementById('min_usd').value=s.min_usd;
   document.getElementById('faceit_key').value=s.faceit_key;
@@ -251,7 +284,12 @@ async function loadAdmin(){
 }
 
 async function loadUsers(){
-  const users=await(await fetch('/api/admin/users')).json();
+  const r=await fetch('/api/admin/users');
+  const users=await r.json().catch(()=>({}));
+  if(!r.ok || !Array.isArray(users)){
+    document.getElementById('utbody').innerHTML=`<tr><td colspan="7">${e(users.error||'Нет доступа')}</td></tr>`;
+    return;
+  }
   document.getElementById('utbody').innerHTML=users.map(u=>{
     const stateDot = u.state==='ошибка'?'sd-err': u.state==='жду новых матчей'?'sd-ok':'sd-idle';
     return `<tr>
@@ -266,7 +304,7 @@ async function loadUsers(){
           <option value="worker" ${u.role==='worker'?'selected':''}>worker</option>
           <option value="admin"  ${u.role==='admin' ?'selected':''}>admin</option>
         </select>
-        <button class="del" onclick="delUser(${u.id},'${e(u.username)}')" style="margin-left:4px">DEL</button>
+        <button type="button" class="del" data-act="deluser" data-id="${Number(u.id)}" data-name="${e(u.username)}" style="margin-left:4px">DEL</button>
       </td>
     </tr>`;
   }).join('');
@@ -286,11 +324,29 @@ async function delUser(uid, name){
 }
 
 async function loadLoginLog(){
-  const logs=await(await fetch('/api/admin/login_log')).json();
+  const r=await fetch('/api/admin/login_log');
+  const logs=await r.json().catch(()=>[]);
+  if(!r.ok || !Array.isArray(logs)){
+    document.getElementById('login-log').textContent=(logs && logs.error) || 'Нет доступа';
+    return;
+  }
   document.getElementById('login-log').textContent=logs.map(l=>
     `${fmtDate(l.at)}  ${l.ok?'✅':'❌'}  ${l.username}  (${l.ip})`
   ).join('\n')||'Логов нет';
 }
+
+document.getElementById('list').addEventListener('click', ev=>{
+  const btn=ev.target.closest('[data-act]');
+  if(!btn) return;
+  const nick=btn.getAttribute('data-nick');
+  if(btn.dataset.act==='del') delPlayer(nick);
+  else setSt(nick, btn.dataset.next);
+});
+document.getElementById('utbl').addEventListener('click', ev=>{
+  const btn=ev.target.closest('[data-act="deluser"]');
+  if(!btn) return;
+  delUser(Number(btn.dataset.id), btn.getAttribute('data-name'));
+});
 
 // ── Статус бота ────────────────────────────────────────────────────────────
 async function stat(){

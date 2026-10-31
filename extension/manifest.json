@@ -1,25 +1,33 @@
 {
   "manifest_version": 3,
   "name": "FACEIT Panel Token",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Автоматически получает Bearer токен с faceit.com",
   "permissions": [
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "cookies"
   ],
   "host_permissions": [
     "https://www.faceit.com/*",
     "https://api.faceit.com/*"
   ],
-  "background": {
-    "service_worker": "background.js"
-  },
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "content_scripts": [
     {
       "matches": ["https://www.faceit.com/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.faceit.com/*"],
+      "js": ["pagehook.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ],
   "action": {

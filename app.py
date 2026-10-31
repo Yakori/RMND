@@ -4,16 +4,31 @@ from contextlib import asynccontextmanager
 
 import httpx, uvicorn
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 FROZEN = getattr(sys, "frozen", False)
 RES = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+def _write_default_config(path: str):
+    with open(path, "w", encoding="utf-8") as _f:
+        json.dump({"faceit_key": "", "faceit_nick": "", "min_usd": 300,
+                   "price_mult": 0.75, "poll_seconds": 120, "steam_delay": 1,
+                   "batch_size": 100, "batch_pause": 15,
+                   "host": "0.0.0.0", "port": 8000}, _f, indent=2)
+
+
+def _copy_example_config(dest: str) -> bool:
+    for example in (os.path.join(BASE, "config.example.json"), os.path.join(RES, "config.example.json")):
+        if os.path.exists(example):
+            shutil.copy(example, dest)
+            return True
+    return False
+
+
 if FROZEN:
     BASE = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "FaceitPanel")
     os.makedirs(BASE, exist_ok=True)
-    if not os.path.exists(os.path.join(BASE, "config.json")):
-        shutil.copy(os.path.join(RES, "config.json"), os.path.join(BASE, "config.json"))
 else:
     BASE = RES
 os.chdir(BASE)
@@ -21,23 +36,19 @@ if sys.stdout is None or sys.stderr is None:
     sys.stdout = sys.stderr = open("panel.log", "a", encoding="utf-8", buffering=1)
 
 CFG_PATH = os.path.join(BASE, "config.json")
-# Если config.json нет — создаём из шаблона
 if not os.path.exists(CFG_PATH):
-    example = os.path.join(BASE, "config.example.json")
-    if os.path.exists(example):
-        shutil.copy(example, CFG_PATH)
-    else:
-        with open(CFG_PATH, "w", encoding="utf-8") as _f:
-            json.dump({"faceit_key": "", "faceit_nick": "", "min_usd": 300,
-                       "price_mult": 0.75, "poll_seconds": 120, "steam_delay": 1,
-                       "batch_size": 100, "batch_pause": 15,
-                       "host": "0.0.0.0", "port": 8000, "panel_password": ""}, _f, indent=2)
-    print(f"Создан config.json из шаблона — зайди в настройки панели", flush=True)
-CFG = json.load(open(CFG_PATH, encoding="utf-8"))
+    if not _copy_example_config(CFG_PATH):
+        _write_default_config(CFG_PATH)
+    print("Создан config.json из шаблона — зайди в настройки панели", flush=True)
+try:
+    with open(CFG_PATH, encoding="utf-8") as _f:
+        CFG = json.load(_f)
+except json.JSONDecodeError as _e:
+    sys.exit(f"config.json повреждён ({CFG_PATH}): {_e}")
 cfg_lock = threading.Lock()
 MULT    = float(CFG.get("price_mult", 0.75))
 POLL    = int(CFG.get("poll_seconds", 120))
-STEAM_DELAY = float(CFG.get("steam_delay", 5))
+STEAM_DELAY = float(CFG.get("steam_delay", 1))
 BATCH   = int(CFG.get("batch_size", 100))
 BATCH_PAUSE = float(CFG.get("batch_pause", 15))
 HOST    = os.environ.get("HOST", CFG.get("host", "0.0.0.0"))
@@ -60,17 +71,20 @@ CREATE TABLE IF NOT EXISTS users(
   faceit_key   TEXT NOT NULL DEFAULT '',
   faceit_nick  TEXT NOT NULL DEFAULT '',
   min_usd      REAL NOT NULL DEFAULT 300,
+  faceit_bearer TEXT NOT NULL DEFAULT '',
+  faceit_id    TEXT NOT NULL DEFAULT '',
   created_at   REAL NOT NULL,
   last_login   REAL
 );
 CREATE TABLE IF NOT EXISTS players(
-  id       INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id  INTEGER NOT NULL,
-  nick     TEXT NOT NULL,
-  steam_id TEXT,
-  usd      REAL,
-  status   TEXT DEFAULT 'new',
-  added    REAL,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  nick       TEXT NOT NULL,
+  steam_id   TEXT,
+  usd        REAL,
+  status     TEXT DEFAULT 'new',
+  added      REAL,
+  faceit_pid TEXT NOT NULL DEFAULT '',
   UNIQUE(user_id, nick)
 );
 CREATE TABLE IF NOT EXISTS seen(
@@ -100,8 +114,9 @@ for col, ddl in [
 ]:
     try:
         db.execute(ddl)
-    except sqlite3.OperationalError:
-        pass  # колонка уже есть
+    except sqlite3.OperationalError as err:
+        if "duplicate column" not in str(err).lower():
+            raise
 
 # Миграция таблицы players: добавляем user_id если старая схема
 existing_cols = {r[1] for r in db.execute("PRAGMA table_info(players)").fetchall()}
@@ -110,13 +125,14 @@ if "user_id" not in existing_cols:
     db.executescript("""
     ALTER TABLE players RENAME TO players_old;
     CREATE TABLE players(
-      id       INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id  INTEGER NOT NULL DEFAULT 1,
-      nick     TEXT NOT NULL,
-      steam_id TEXT,
-      usd      REAL,
-      status   TEXT DEFAULT 'new',
-      added    REAL,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL DEFAULT 1,
+      nick       TEXT NOT NULL,
+      steam_id   TEXT,
+      usd        REAL,
+      status     TEXT DEFAULT 'new',
+      added      REAL,
+      faceit_pid TEXT NOT NULL DEFAULT '',
       UNIQUE(user_id, nick)
     );
     INSERT INTO players(user_id, nick, steam_id, usd, status, added)
@@ -138,6 +154,10 @@ if "user_id" not in seen_cols:
     DROP TABLE seen_old;
     """)
 
+player_cols = {r[1] for r in db.execute("PRAGMA table_info(players)").fetchall()}
+if "faceit_pid" not in player_cols:
+    db.execute("ALTER TABLE players ADD COLUMN faceit_pid TEXT NOT NULL DEFAULT ''")
+
 db.commit()
 
 # глобальные состояния ботов: user_id -> dict
@@ -152,9 +172,17 @@ prices_lock = threading.Lock()
 def log_bot(uid: int, msg: str):
     line = f"{time.strftime('%H:%M:%S')}  {msg}"
     with bots_lock:
-        if uid in bots:
-            bots[uid]["events"].appendleft(line)
+        bot = bots.get(uid)
+        if bot is not None:
+            bot["events"].appendleft(line)
     print(f"[user {uid}] {line}", flush=True)
+
+
+def set_bot_state(uid: int, state: str):
+    with bots_lock:
+        bot = bots.get(uid)
+        if bot is not None:
+            bot["state"] = state
 
 
 def hash_password(pw: str) -> str:
@@ -166,8 +194,10 @@ def session_token(username: str) -> str:
 
 
 def get_user(request: Request):
-    """Возвращает Row пользователя или None."""
-    token = request.cookies.get(COOKIE)
+    """Возвращает Row пользователя или None.
+    Заголовок X-Panel-Token нужен расширению: cookie SameSite=Lax
+    не уходит в cross-origin POST с chrome-extension://."""
+    token = request.cookies.get(COOKIE) or request.headers.get("x-panel-token")
     if not token:
         return None
     with db_lock:
@@ -236,46 +266,98 @@ async def ensure_prices(_c: httpx.AsyncClient):
     print(f"цены обновлены (market.csgo.com): {len(prices)} предметов", flush=True)
 
 
+def _steam_names(descriptions) -> tuple[dict[tuple[str, str], str], dict[str, str]]:
+    by_pair: dict[tuple[str, str], str] = {}
+    by_class: dict[str, str] = {}
+    for item in descriptions or []:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("classid") or "")
+        name = item.get("market_hash_name") or ""
+        if not cid or not name:
+            continue
+        iid = str(item.get("instanceid") or "0")
+        by_pair[(cid, iid)] = name
+        by_class.setdefault(cid, name)
+    return by_pair, by_class
+
+
 async def inventory_usd(c: httpx.AsyncClient, steam_id: str) -> float | None:
-    r = await c.get(f"https://steamcommunity.com/inventory/{steam_id}/730/2",
-                    params={"l": "english", "count": 2000})
-    if r.status_code == 429:
-        raise RateLimited()
-    if r.status_code != 200:
-        return None
-    d = r.json()
-    if not isinstance(d, dict):
-        return None
     with prices_lock:
-        names = {x["classid"]: x["market_hash_name"] for x in d.get("descriptions", [])}
-        return sum(prices.get(names.get(a["classid"]), 0) for a in d.get("assets", []))
+        price_map = dict(prices)
+    total = 0.0
+    start_assetid = None
+    for _ in range(8):
+        params = {"l": "english", "count": 2000}
+        if start_assetid:
+            params["start_assetid"] = start_assetid
+        r = await c.get(f"https://steamcommunity.com/inventory/{steam_id}/730/2", params=params)
+        if r.status_code == 429:
+            raise RateLimited()
+        if r.status_code != 200:
+            return None
+        try:
+            d = r.json()
+        except Exception:
+            return None
+        if not isinstance(d, dict) or d.get("success") is False:
+            return None
+        by_pair, by_class = _steam_names(d.get("descriptions") or [])
+        for asset in d.get("assets") or []:
+            if not isinstance(asset, dict):
+                continue
+            cid = str(asset.get("classid") or "")
+            iid = str(asset.get("instanceid") or "0")
+            name = by_pair.get((cid, iid)) or by_class.get(cid)
+            if not name:
+                continue
+            try:
+                amount = int(asset.get("amount") or 1)
+            except (TypeError, ValueError):
+                amount = 1
+            total += price_map.get(name, 0) * max(amount, 1)
+        if not d.get("more_items") or not d.get("last_assetid"):
+            break
+        nxt = str(d["last_assetid"])
+        if nxt == start_assetid:
+            break
+        start_assetid = nxt
+    return total
 
 
 # ── FACEIT friend requests ────────────────────────────────────────────────────
 FACEIT_API2 = "https://api.faceit.com"
 
 
-async def faceit_send_friend(bearer: str, my_faceit_id: str, target_nick: str) -> tuple[bool, str]:
-    """Отправляет заявку в друзья на FACEIT. Возвращает (успех, сообщение)."""
+async def faceit_send_friend(api_key: str, bearer: str, my_faceit_id: str, target_nick: str) -> tuple[bool, str, str]:
+    """Заявка в друзья. Open Data API — ключ сервера, friend API — сессионный bearer.
+    Возвращает (успех, сообщение, faceit_id цели)."""
+    if not api_key:
+        return False, "нет FACEIT API ключа", ""
+    if not bearer:
+        return False, "bearer не указан в настройках", ""
+    if not my_faceit_id:
+        return False, "нет faceit_id — сохрани ник и API ключ", ""
     async with httpx.AsyncClient(timeout=15) as c:
-        # Сначала получаем faceit_id цели по нику
         r = await c.get(f"{API}/players", params={"nickname": target_nick},
-                        headers={"Authorization": f"Bearer {bearer}"})
+                        headers={"Authorization": f"Bearer {api_key}"})
         if r.status_code != 200:
-            return False, f"не найден игрок {target_nick}"
-        target_id = r.json().get("player_id")
+            return False, f"не найден игрок {target_nick}", ""
+        try:
+            target_id = r.json().get("player_id") or ""
+        except Exception:
+            return False, "некорректный ответ FACEIT", ""
         if not target_id:
-            return False, "не удалось получить player_id"
+            return False, "не удалось получить player_id", ""
 
-        # Отправляем заявку
         r2 = await c.post(
             f"{FACEIT_API2}/friend-requests/v1/users/{my_faceit_id}/requests",
             json={"targetUserId": target_id},
             headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
         )
         if r2.status_code in (200, 201, 204):
-            return True, "заявка отправлена"
-        return False, f"ошибка {r2.status_code}: {r2.text[:120]}"
+            return True, "заявка отправлена", target_id
+        return False, f"ошибка {r2.status_code}: {r2.text[:120]}", target_id
 
 
 async def faceit_check_friends(bearer: str, my_faceit_id: str) -> set[str]:
@@ -289,18 +371,36 @@ async def faceit_check_friends(bearer: str, my_faceit_id: str) -> set[str]:
             return set()
         data = r.json()
         # ответ может быть списком или {"friends": [...]}
-        items = data if isinstance(data, list) else data.get("friends", data.get("items", []))
-        return {f.get("userId") or f.get("id") or f.get("player_id", "") for f in items if isinstance(f, dict)}
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("friends", data.get("items", []))
+        else:
+            items = []
+        ids = set()
+        for item in items or []:
+            if isinstance(item, str) and item:
+                ids.add(item)
+            elif isinstance(item, dict):
+                pid = item.get("userId") or item.get("id") or item.get("player_id") or ""
+                if pid:
+                    ids.add(pid)
+        return ids
 
 
-async def get_my_faceit_id(bearer: str, nick: str) -> str:
-    """Получает FACEIT player_id текущего пользователя."""
+async def get_my_faceit_id(api_key: str, nick: str) -> str:
+    """player_id по нику через Open Data API (серверный ключ, не сессионный JWT)."""
+    if not api_key or not nick:
+        return ""
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.get(f"{API}/players", params={"nickname": nick},
-                        headers={"Authorization": f"Bearer {bearer}"})
-        if r.status_code == 200:
-            return r.json().get("player_id", "")
-    return ""
+                        headers={"Authorization": f"Bearer {api_key}"})
+        if r.status_code != 200:
+            return ""
+        try:
+            return r.json().get("player_id") or ""
+        except Exception:
+            return ""
 
 
 # ── Бот одного пользователя ──────────────────────────────────────────────────
@@ -315,88 +415,107 @@ async def poll_user(uid: int):
             try:
                 with db_lock:
                     row = db.execute(
-                        "SELECT faceit_key, faceit_nick, min_usd, faceit_bearer, faceit_id FROM users WHERE id=?", (uid,)
+                        "SELECT faceit_key, faceit_nick, min_usd, faceit_bearer, faceit_id FROM users WHERE id=?",
+                        (uid,),
                     ).fetchone()
                 if not row or not row["faceit_key"] or not row["faceit_nick"]:
-                    with bots_lock:
-                        bots[uid]["state"] = "нет настроек"
+                    set_bot_state(uid, "нет настроек")
                     await asyncio.sleep(POLL)
                     continue
 
-                key     = row["faceit_key"]
-                nick    = row["faceit_nick"]
+                key = row["faceit_key"]
+                nick = row["faceit_nick"]
                 min_usd = float(row["min_usd"])
-                bearer  = row["faceit_bearer"] or ""
-                my_fid  = row["faceit_id"] or ""
+                bearer = row["faceit_bearer"] or ""
+                my_fid = row["faceit_id"] or ""
 
                 fc.headers["Authorization"] = f"Bearer {key}"
                 await ensure_prices(c)
 
-                # Если есть bearer — кешируем свой faceit_id
-                if bearer and not my_fid:
-                    my_fid = await get_my_faceit_id(bearer, nick)
-                    if my_fid:
-                        with db_lock:
-                            db.execute("UPDATE users SET faceit_id=? WHERE id=?", (my_fid, uid))
-                            db.commit()
+                me = await fc.get(f"{API}/players", params={"nickname": nick})
+                if me.status_code != 200:
+                    raise RuntimeError(f"FACEIT {me.status_code}: проверь ключ/ник")
+                try:
+                    me_id = me.json().get("player_id") or ""
+                except Exception:
+                    me_id = ""
+                if not me_id:
+                    raise RuntimeError("FACEIT не вернул player_id")
+                if my_fid != me_id:
+                    my_fid = me_id
+                    with db_lock:
+                        db.execute("UPDATE users SET faceit_id=? WHERE id=?", (my_fid, uid))
+                        db.commit()
 
-                # ── Проверяем принятые заявки каждые 2 минуты ──
                 if bearer and my_fid and time.time() - last_friends_check > 120:
                     last_friends_check = time.time()
                     try:
                         friend_ids = await faceit_check_friends(bearer, my_fid)
                         if friend_ids:
-                            # получаем faceit_id всех игроков со статусом sent
                             with db_lock:
                                 sent = db.execute(
-                                    "SELECT nick FROM players WHERE user_id=? AND status='sent'", (uid,)
+                                    "SELECT nick, faceit_pid FROM players WHERE user_id=? AND status='sent'",
+                                    (uid,),
                                 ).fetchall()
                             for s in sent:
                                 pnick = s["nick"]
-                                # получаем faceit_id игрока
-                                async with httpx.AsyncClient(timeout=10) as tc:
-                                    pr = await tc.get(f"{API}/players", params={"nickname": pnick},
-                                                      headers={"Authorization": f"Bearer {key}"})
-                                if pr.status_code == 200:
-                                    pid = pr.json().get("player_id", "")
-                                    if pid and pid in friend_ids:
+                                pid = s["faceit_pid"] or ""
+                                if not pid:
+                                    pr = await fc.get(f"{API}/players", params={"nickname": pnick})
+                                    if pr.status_code != 200:
+                                        continue
+                                    try:
+                                        pid = pr.json().get("player_id") or ""
+                                    except Exception:
+                                        pid = ""
+                                    if pid:
                                         with db_lock:
                                             db.execute(
-                                                "UPDATE players SET status='accepted' WHERE user_id=? AND nick=?",
-                                                (uid, pnick))
+                                                "UPDATE players SET faceit_pid=? WHERE user_id=? AND nick=?",
+                                                (pid, uid, pnick),
+                                            )
                                             db.commit()
-                                        log_bot(uid, f"{pnick}: принял заявку → accepted")
+                                if pid and pid in friend_ids:
+                                    with db_lock:
+                                        db.execute(
+                                            "UPDATE players SET status='accepted' WHERE user_id=? AND nick=?",
+                                            (uid, pnick),
+                                        )
+                                        db.commit()
+                                    log_bot(uid, f"{pnick}: принял заявку → accepted")
                     except Exception as fe:
                         log_bot(uid, f"проверка друзей: {fe}")
 
-                with bots_lock:
-                    bots[uid]["state"] = "смотрю матчи"
-
-                r = await fc.get(f"{API}/players", params={"nickname": nick})
-                if r.status_code != 200:
-                    raise RuntimeError(f"FACEIT {r.status_code}: проверь ключ/ник")
-                me_id = r.json()["player_id"]
+                set_bot_state(uid, "смотрю матчи")
 
                 items = []
                 for game in ("cs2", "csgo"):
-                    r = await fc.get(f"{API}/players/{me_id}/history",
-                                     params={"game": game, "limit": 20})
-                    items = r.json().get("items", []) if r.status_code == 200 else []
-                    if items:
+                    hr = await fc.get(
+                        f"{API}/players/{me_id}/history",
+                        params={"game": game, "limit": 20},
+                    )
+                    if hr.status_code != 200:
+                        continue
+                    try:
+                        got = hr.json().get("items") or []
+                    except Exception:
+                        got = []
+                    if got:
+                        items = got
                         break
 
                 with db_lock:
-                    new = [m for m in items if not db.execute(
-                        "SELECT 1 FROM seen WHERE user_id=? AND match_id=?",
-                        (uid, m["match_id"])).fetchone()]
+                    new = [
+                        m for m in items
+                        if isinstance(m, dict) and m.get("match_id") and not db.execute(
+                            "SELECT 1 FROM seen WHERE user_id=? AND match_id=?",
+                            (uid, m["match_id"]),
+                        ).fetchone()
+                    ]
                 log_bot(uid, f"матчей: {len(items)}, новых: {len(new)}")
 
-                # Если новых матчей нет — пропускаем проверку инвентарей
                 if not new:
-                    with db_lock:
-                        bots[uid]["state"] = "жду новых матчей" if False else None
-                    with bots_lock:
-                        bots[uid]["state"] = "жду новых матчей"
+                    set_bot_state(uid, "жду новых матчей")
                     await asyncio.sleep(POLL)
                     continue
 
@@ -405,21 +524,32 @@ async def poll_user(uid: int):
                     r2 = await fc.get(f"{API}/matches/{mid}")
                     if r2.status_code != 200:
                         continue
-                    for team in r2.json().get("teams", {}).values():
-                        for p in team.get("roster", []):
+                    try:
+                        teams = r2.json().get("teams") or {}
+                    except Exception:
+                        continue
+                    if not isinstance(teams, dict):
+                        continue
+                    incomplete = False
+                    for team in teams.values():
+                        if not isinstance(team, dict):
+                            continue
+                        for p in team.get("roster") or []:
+                            if not isinstance(p, dict):
+                                continue
                             pnick, sid = p.get("nickname"), p.get("game_player_id")
                             if not pnick or not sid or pnick == nick:
                                 continue
                             with db_lock:
                                 already = db.execute(
                                     "SELECT 1 FROM players WHERE user_id=? AND nick=?",
-                                    (uid, pnick)).fetchone()
+                                    (uid, pnick),
+                                ).fetchone()
                             if already:
                                 continue
                             if time.time() - checked.get(pnick, 0) < 6 * 3600:
                                 continue
-                            with bots_lock:
-                                bots[uid]["state"] = f"проверяю {pnick}"
+                            set_bot_state(uid, f"проверяю {pnick}")
                             usd = "retry"
                             for attempt in range(3):
                                 try:
@@ -428,10 +558,14 @@ async def poll_user(uid: int):
                                 except RateLimited:
                                     wait = 300 + attempt * 60
                                     log_bot(uid, f"Steam rate limit, жду {wait} сек")
-                                    with bots_lock:
-                                        bots[uid]["state"] = f"Steam rate limit, жду {wait}с"
+                                    set_bot_state(uid, f"Steam rate limit, жду {wait}с")
                                     await asyncio.sleep(wait)
+                                except Exception as inv_err:
+                                    log_bot(uid, f"{pnick}: инвентарь {inv_err}")
+                                    usd = None
+                                    break
                             if usd == "retry":
+                                incomplete = True
                                 continue
                             checked[pnick] = time.time()
                             if usd is None:
@@ -441,7 +575,8 @@ async def poll_user(uid: int):
                                     db.execute(
                                         "INSERT OR IGNORE INTO players"
                                         "(user_id,nick,steam_id,usd,added) VALUES(?,?,?,?,?)",
-                                        (uid, pnick, sid, round(usd), time.time()))
+                                        (uid, pnick, sid, round(usd), time.time()),
+                                    )
                                     db.commit()
                                 log_bot(uid, f"{pnick}: ${usd:.0f} добавлен")
                             else:
@@ -452,18 +587,22 @@ async def poll_user(uid: int):
                             else:
                                 await asyncio.sleep(STEAM_DELAY)
 
+                    if incomplete:
+                        log_bot(uid, f"матч {mid}: не все инвентари проверены, повторю позже")
+                        continue
                     with db_lock:
-                        db.execute("INSERT OR IGNORE INTO seen VALUES(?,?)", (uid, mid))
+                        db.execute(
+                            "INSERT OR IGNORE INTO seen(user_id, match_id) VALUES(?,?)",
+                            (uid, mid),
+                        )
                         db.commit()
 
-                with bots_lock:
-                    bots[uid]["state"] = "жду новых матчей"
+                set_bot_state(uid, "жду новых матчей")
 
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                with bots_lock:
-                    bots[uid]["state"] = "ошибка"
+                set_bot_state(uid, "ошибка")
                 log_bot(uid, f"ОШИБКА: {e}")
                 traceback.print_exc()
 
@@ -501,7 +640,7 @@ AUTH_CSS = (
     "--blue:#8ea7c0;--blue2:#5f7a96;--red:#ef6b72;color-scheme:dark}"
     "*{box-sizing:border-box}"
     "body{margin:0;min-height:100vh;display:grid;place-items:center;"
-    "background:radial-gradient(900px 500px at 85%% -10%%,#1b2430 0,transparent 60%%),#0a0c0f;"
+    "background:radial-gradient(900px 500px at 85% -10%,#1b2430 0,transparent 60%),#0a0c0f;"
     "color:#eaeef2;font:15px/1.4 'Segoe UI Variable','Segoe UI',system-ui,sans-serif}"
     ".card{width:min(420px,94vw);background:#11141a;border:1px solid #232a33;border-radius:20px;padding:32px}"
     ".logo{display:flex;align-items:center;gap:10px;margin-bottom:24px}"
@@ -511,10 +650,10 @@ AUTH_CSS = (
     "h2{font:600 22px/1.2 Bahnschrift,'Segoe UI',sans-serif;margin:0 0 6px}"
     ".sub{color:#8994a1;font-size:14px;margin:0 0 22px}"
     "label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8994a1;margin-bottom:14px}"
-    "input{width:100%%;padding:12px 14px;border-radius:12px;border:1px solid #232a33;"
+    "input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid #232a33;"
     "background:#171b22;color:#eaeef2;font:inherit;outline:none;transition:border-color .15s}"
     "input:focus{border-color:#5f7a96}"
-    ".btn{display:block;width:100%%;margin-top:8px;padding:12px;border:0;border-radius:12px;"
+    ".btn{display:block;width:100%;margin-top:8px;padding:12px;border:0;border-radius:12px;"
     "font:600 15px/1 inherit;cursor:pointer;background:linear-gradient(135deg,#8ea7c0,#5f7a96);"
     "color:#0a0c0f;transition:opacity .15s}"
     ".btn:hover{opacity:.88}"
@@ -569,6 +708,8 @@ def register_page(err=""):
 # ── Middleware ────────────────────────────────────────────────────────────────
 @app.middleware("http")
 async def gate(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
     path = request.url.path
     if path in ("/login", "/register", "/health"):
         return await call_next(request)
@@ -577,6 +718,16 @@ async def gate(request: Request, call_next):
     if path.startswith("/api/"):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return RedirectResponse("/login", status_code=302)
+
+
+# Последний middleware становится внешним и отвечает на preflight до проверки сессии.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"chrome-extension://[a-p]{32}",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Panel-Token"],
+)
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
@@ -697,14 +848,25 @@ async def api_set_status(nick: str, b: St, request: Request):
     if b.status == "sent":
         bearer = u["faceit_bearer"] or ""
         my_fid = u["faceit_id"] or ""
-        if bearer and my_fid:
-            ok, msg = await faceit_send_friend(bearer, my_fid, nick)
+        if bearer and not my_fid and u["faceit_key"] and u["faceit_nick"]:
+            my_fid = await get_my_faceit_id(u["faceit_key"], u["faceit_nick"])
+            if my_fid:
+                with db_lock:
+                    db.execute("UPDATE users SET faceit_id=? WHERE id=?", (my_fid, u["id"]))
+                    db.commit()
+        if bearer:
+            ok, msg, pid = await faceit_send_friend(u["faceit_key"], bearer, my_fid, nick)
             log_bot(u["id"], f"инвайт → {nick}: {msg}")
             result["invite"] = msg
-        elif bearer and not my_fid:
-            result["invite"] = "нет faceit_id — перезайди в настройки"
+            if pid:
+                with db_lock:
+                    db.execute(
+                        "UPDATE players SET faceit_pid=? WHERE user_id=? AND nick=?",
+                        (pid, u["id"], nick),
+                    )
+                    db.commit()
         else:
-            result["invite"] = "bearer не указан в настройках"
+            result["invite"] = "bearer не указан — статус сохранён, заявка не отправлена"
     return result
 
 
@@ -714,6 +876,7 @@ def api_delete_player(nick: str, request: Request):
     with db_lock:
         db.execute("DELETE FROM players WHERE user_id=? AND nick=?", (u["id"], nick))
         db.commit()
+    return {"ok": True}
 
 
 # ── API: статус бота ──────────────────────────────────────────────────────────
@@ -765,11 +928,18 @@ def api_save_settings(b: SettingsIn, request: Request):
         return JSONResponse({"error": "укажи FACEIT ник"}, status_code=400)
     if usd < 0:
         return JSONResponse({"error": "минимальная цена не может быть меньше 0"}, status_code=400)
+    nick_changed = nick != (u["faceit_nick"] or "")
     with db_lock:
-        db.execute(
-            "UPDATE users SET faceit_key=?, faceit_nick=?, min_usd=?, faceit_bearer=?, faceit_id='' WHERE id=?",
-            (key, nick, usd, bearer, u["id"]))
-        db.execute("DELETE FROM players WHERE user_id=? AND usd < ?", (u["id"], usd))
+        if nick_changed:
+            db.execute(
+                "UPDATE users SET faceit_key=?, faceit_nick=?, min_usd=?, faceit_bearer=?, faceit_id='' WHERE id=?",
+                (key, nick, usd, bearer, u["id"]))
+        else:
+            db.execute(
+                "UPDATE users SET faceit_key=?, faceit_nick=?, min_usd=?, faceit_bearer=? WHERE id=?",
+                (key, nick, usd, bearer, u["id"]))
+        if usd > float(u["min_usd"] or 0):
+            db.execute("DELETE FROM players WHERE user_id=? AND usd < ?", (u["id"], usd))
         db.commit()
     return {"ok": True, "faceit_key": key, "faceit_nick": nick, "min_usd": usd, "faceit_bearer": bearer}
 
@@ -786,15 +956,19 @@ async def api_set_token(b: TokenIn, request: Request):
     if not token:
         return JSONResponse({"error": "токен пустой"}, status_code=400)
     # Получаем faceit_id по токену
-    my_fid = ""
-    if u["faceit_nick"]:
-        my_fid = await get_my_faceit_id(token, u["faceit_nick"])
+    my_fid = u["faceit_id"] or ""
+    if u["faceit_nick"] and u["faceit_key"]:
+        resolved = await get_my_faceit_id(u["faceit_key"], u["faceit_nick"])
+        if resolved:
+            my_fid = resolved
     with db_lock:
         db.execute("UPDATE users SET faceit_bearer=?, faceit_id=? WHERE id=?",
                    (token, my_fid, u["id"]))
         db.commit()
-    log_bot(u["id"], f"bearer токен обновлён через расширение")
+    log_bot(u["id"], "bearer токен обновлён через расширение")
     return {"ok": True, "faceit_id": my_fid}
+
+
 @app.get("/api/admin/users")
 def api_admin_users(request: Request):
     if not require_admin(request):
@@ -821,9 +995,9 @@ def api_admin_users(request: Request):
 
 @app.delete("/api/admin/users/{uid}")
 def api_admin_delete_user(uid: int, request: Request):
-    if not require_admin(request):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
     me = require_admin(request)
+    if not me:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
     if me["id"] == uid:
         return JSONResponse({"error": "нельзя удалить себя"}, status_code=400)
     with bots_lock:

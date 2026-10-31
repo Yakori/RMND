@@ -128,7 +128,20 @@ btnSend.addEventListener("click", async () => {
     showMsg("Укажи адрес панели", "err");
     return;
   }
+  let origin;
+  try {
+    origin = new URL(panelUrl).origin;
+  } catch (e) {
+    showMsg("Некорректный адрес панели", "err");
+    return;
+  }
   chrome.storage.local.set({ panel_url: panelUrl });
+
+  const granted = await chrome.permissions.request({ origins: [origin + "/"] });
+  if (!granted) {
+    showMsg("Нет доступа к этому адресу", "err");
+    return;
+  }
 
   const data = await chrome.storage.local.get(["faceit_token"]);
   if (!data.faceit_token) {
@@ -140,15 +153,24 @@ btnSend.addEventListener("click", async () => {
   showMsg("Отправляю...", "");
 
   try {
-    const resp = await fetch(`${panelUrl}/api/token`, {
+    const headers = { "Content-Type": "application/json" };
+    const cookie = await chrome.cookies.get({ url: origin + "/", name: "fp_session" });
+    if (!cookie || !cookie.value) {
+      showMsg("Сначала войди в панель в этом браузере по тому же адресу", "err");
+      return;
+    }
+    headers["X-Panel-Token"] = cookie.value;
+
+    const resp = await fetch(`${origin}/api/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ token: data.faceit_token }),
-      credentials: "include",
     });
 
     if (resp.ok) {
       showMsg("Токен успешно отправлен в панель ✓", "ok");
+    } else if (resp.status === 401) {
+      showMsg("Сессия панели не подошла. Войди заново по этому адресу", "err");
     } else {
       const err = await resp.json().catch(() => ({}));
       showMsg(err.error || `Ошибка ${resp.status}`, "err");

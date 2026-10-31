@@ -1,5 +1,8 @@
 panel.db
+panel.db-wal
+panel.db-shm
 panel.log
+config.json
 __pycache__/
 *.pyc
 dist/
