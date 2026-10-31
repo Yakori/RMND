@@ -68,3 +68,33 @@ window.addEventListener("message", (ev) => {
 scanPage();
 setTimeout(scanPage, 2000);
 setTimeout(scanPage, 8000);
+
+// Кнопка панели открывает профиль с #panel-add. Токена больше нет,
+// поэтому заявку жмём в уже открытой сессии faceit.com.
+const ADD_LABEL = /^(add friend|добавить в друзья|добавить друга)$/i;
+
+function friendButtonLabel(el) {
+  return (el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
+}
+
+function tryAddFriend() {
+  if (location.hash !== "#panel-add") return false;
+  const nodes = document.querySelectorAll("button, a, [role='button']");
+  for (const el of nodes) {
+    if (!ADD_LABEL.test(friendButtonLabel(el))) continue;
+    el.click();
+    history.replaceState(null, "", location.pathname + location.search);
+    return true;
+  }
+  return false;
+}
+
+function watchAddFriend() {
+  if (location.hash !== "#panel-add") return;
+  const started = Date.now();
+  const timer = setInterval(() => {
+    if (tryAddFriend() || Date.now() - started > 20000) clearInterval(timer);
+  }, 400);
+}
+
+watchAddFriend();

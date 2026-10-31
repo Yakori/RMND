@@ -225,11 +225,17 @@ async function loadPlayers(){
 
 async function setSt(n,s){
   showAct('', false);
+  let addTab=null;
+  if(s==='sent'){
+    addTab=window.open('https://www.faceit.com/en/players/'+encodeURIComponent(n)+'#panel-add');
+  }
   try{
     const r=await fetch('/api/players/'+encodeURIComponent(n),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s})});
     const body=await r.json().catch(()=>({}));
     if(!r.ok){showAct(body.error||'Не сохранилось', true);return}
-    if(body.invite) showAct(body.invite, body.invite!=='заявка отправлена');
+    if(s==='sent' && !addTab) showAct('Разреши всплывающие окна для панели — профиль не открылся', true);
+    else if(s==='sent' && body.invite!=='заявка отправлена') showAct('Профиль открыт. Заявка уйдёт, если ты залогинен на faceit.com', false);
+    else if(body.invite) showAct(body.invite, body.invite!=='заявка отправлена');
     loadPlayers();
   }catch(err){showAct('Панель не отвечает', true)}
 }
